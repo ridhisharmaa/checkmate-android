@@ -1,0 +1,15 @@
+# ── Root-level ignores (subfolders have their own .gitignore too) ──
+
+# JetBrains / Android Studio project settings (machine-specific)
+.idea/
+*.iml
+
+# Log files
+*.log
+
+# OS cruft
+.DS_Store
+Thumbs.db
+
+# Dev screenshots (remove this line if you want to track them)
+screen*.png

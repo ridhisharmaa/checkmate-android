@@ -1,0 +1,66 @@
+# Ordered model candidates per capability. quality_rank: lower = tried first.
+# This file is the single place to update as better free models become available —
+# nothing in app/routing/*.py or app/pipeline/*.py should ever hardcode a model name.
+#
+# requires_env: candidate is skipped (not an error) if none of these env vars are set.
+# tier: cloud | local. Local candidates are always ranked last within a capability —
+# the router additionally hard-excludes local candidates from `vision` unless every
+# cloud vision candidate is unavailable/cooling down (handwriting OCR quality gap).
+
+vision:
+  - id: gemini-vision
+    provider: gemini
+    model: gemini-flash-latest
+    quality_rank: 1
+    tier: cloud
+    requires_env: [GEMINI_API_KEYS]
+
+  - id: openai-vision
+    provider: openai
+    model: gpt-4o-mini
+    quality_rank: 2
+    tier: cloud
+    requires_env: [OPENAI_API_KEY]
+
+  - id: anthropic-vision
+    provider: anthropic
+    model: claude-haiku-4-5
+    quality_rank: 3
+    tier: cloud
+    requires_env: [ANTHROPIC_API_KEY]
+
+  - id: ollama-vision
+    provider: ollama
+    model: qwen2.5vl:7b
+    quality_rank: 99  # last resort only — see tier note above
+    tier: local
+    requires_env: []
+
+text:
+  - id: gemini-text
+    provider: gemini
+    model: gemini-flash-latest
+    quality_rank: 1
+    tier: cloud
+    requires_env: [GEMINI_API_KEYS]
+
+  - id: openai-text
+    provider: openai
+    model: gpt-4o-mini
+    quality_rank: 2
+    tier: cloud
+    requires_env: [OPENAI_API_KEY]
+
+  - id: anthropic-text
+    provider: anthropic
+    model: claude-haiku-4-5
+    quality_rank: 3
+    tier: cloud
+    requires_env: [ANTHROPIC_API_KEY]
+
+  - id: ollama-text
+    provider: ollama
+    model: qwen2.5:7b-instruct
+    quality_rank: 4
+    tier: local
+    requires_env: []

@@ -1,0 +1,156 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<title>CheckMate — dev test harness</title>
+<style>
+  body { font-family: system-ui, sans-serif; max-width: 900px; margin: 2rem auto; padding: 0 1rem; color: #222; }
+  h1 { font-size: 1.3rem; }
+  fieldset { margin-bottom: 1rem; }
+  label { display: block; margin: 0.5rem 0 0.2rem; font-weight: 600; }
+  #status { margin: 1rem 0; padding: 0.6rem; background: #f0f0f0; border-radius: 4px; }
+  #status.failed { background: #fde2e2; }
+  #status.done { background: #e2f7e2; }
+  table { border-collapse: collapse; width: 100%; margin-top: 1rem; }
+  th, td { border: 1px solid #ccc; padding: 0.4rem 0.6rem; text-align: left; vertical-align: top; font-size: 0.85rem; }
+  th { background: #eee; }
+  .score { font-weight: 700; }
+  #total { font-size: 1.1rem; font-weight: 700; margin-top: 1rem; }
+</style>
+</head>
+<body>
+<h1>CheckMate — grading pipeline test harness (dev only, not the real UI)</h1>
+
+<fieldset>
+  <label>Teacher answer key (PDF or images, multiple allowed)</label>
+  <input type="file" id="teacherFiles" multiple />
+
+  <label>Student answer sheet (PDF or images, multiple allowed)</label>
+  <input type="file" id="studentFiles" multiple />
+
+  <button id="submitBtn" style="margin-top:1rem;">Start grading</button>
+</fieldset>
+
+<div id="status" style="display:none;"></div>
+<div id="results"></div>
+
+<script>
+const submitBtn = document.getElementById("submitBtn");
+const statusEl = document.getElementById("status");
+const resultsEl = document.getElementById("results");
+
+submitBtn.addEventListener("click", async () => {
+  const teacherFiles = document.getElementById("teacherFiles").files;
+  const studentFiles = document.getElementById("studentFiles").files;
+  if (!teacherFiles.length || !studentFiles.length) {
+    alert("Select at least one teacher file and one student file.");
+    return;
+  }
+
+  const form = new FormData();
+  for (const f of teacherFiles) form.append("teacher_files", f);
+  for (const f of studentFiles) form.append("student_files", f);
+
+  submitBtn.disabled = true;
+  resultsEl.innerHTML = "";
+  setStatus("uploading...", "");
+
+  try {
+    const resp = await fetch("/submissions", { method: "POST", body: form });
+    if (!resp.ok) throw new Error(await resp.text());
+    const { submission_id, job_id } = await resp.json();
+    await pollJob(job_id, submission_id);
+  } catch (err) {
+    setStatus("Error: " + err.message, "failed");
+    submitBtn.disabled = false;
+  }
+});
+
+async function pollJob(jobId, submissionId) {
+  const poll = async () => {
+    const resp = await fetch(`/jobs/${jobId}`);
+    const job = await resp.json();
+
+    if (job.status === "failed") {
+      setStatus("Failed: " + (job.error_message || "unknown error"), "failed");
+      submitBtn.disabled = false;
+      return;
+    }
+    if (job.status === "done") {
+      setStatus("Done — fetching results...", "done");
+      await loadResult(submissionId);
+      submitBtn.disabled = false;
+      return;
+    }
+    setStatus(`${job.status} — stage: ${job.current_stage || "starting"}`, "");
+    setTimeout(poll, 1500);
+  };
+  poll();
+}
+
+function setStatus(text, cls) {
+  statusEl.style.display = "block";
+  statusEl.className = cls;
+  statusEl.textContent = text;
+}
+
+async function loadResult(submissionId) {
+  const resp = await fetch(`/submissions/${submissionId}`);
+  const data = await resp.json();
+  if (!data.result) {
+    setStatus("No result yet.", "");
+    return;
+  }
+  render(data.submission_id, data.result);
+}
+
+function render(submissionId, result) {
+  const rows = result.results.map(r => `
+    <tr>
+      <td>${r.path.join(" / ")}</td>
+      <td>${escapeHtml(r.question_text)}</td>
+      <td>${escapeHtml(r.model_answer)}</td>
+      <td>${r.attempted ? escapeHtml(r.student_answer || "") : "<em>not attempted</em>"}</td>
+      <td class="score">${r.final_score} / ${r.max_marks}${r.counted_toward_total ? "" : " (not counted)"}</td>
+      <td>${escapeHtml(r.feedback)}</td>
+      <td>
+        <button onclick="override('${submissionId}', '${r.id}', 'full')">Full</button>
+        <button onclick="override('${submissionId}', '${r.id}', 'half')">Half</button>
+        <button onclick="override('${submissionId}', '${r.id}', 'no_credit')">None</button>
+      </td>
+    </tr>`).join("");
+
+  resultsEl.innerHTML = `
+    <h2>Overview</h2>
+    <p><strong>Handwriting confidence:</strong> ${(result.handwriting_confidence * 100).toFixed(0)}%</p>
+    <p><strong>Strengths:</strong> ${result.overview.strengths.join("; ")}</p>
+    <p><strong>Watch for:</strong> ${result.overview.watch_for.join("; ")}</p>
+    <div id="total">Total: ${result.total_score} / ${result.max_score} (${result.grade_letter})</div>
+    <table>
+      <thead><tr><th>Question</th><th>Question text</th><th>Reference answer</th><th>Student answer</th><th>Score</th><th>Feedback</th><th>Override</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>`;
+}
+
+async function override(submissionId, questionResultId, choice) {
+  const resp = await fetch(`/submissions/${submissionId}/questions/${questionResultId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ override: choice }),
+  });
+  if (!resp.ok) {
+    alert("Override failed: " + (await resp.text()));
+    return;
+  }
+  const data = await resp.json();
+  render(data.submission_id, data.result);
+}
+
+function escapeHtml(s) {
+  const div = document.createElement("div");
+  div.textContent = s ?? "";
+  return div.innerHTML;
+}
+</script>
+</body>
+</html>
