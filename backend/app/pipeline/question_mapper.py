@@ -7,6 +7,7 @@ Accuracy over speed here, per explicit product decision: this is the highest-ris
 step in the whole pipeline.
 """
 import re
+from collections import defaultdict
 from abc import ABC, abstractmethod
 
 from app.routing.base import Capability
@@ -16,11 +17,16 @@ from app.schemas.mapping import LLMMatchResult, MappedAnswer
 from app.schemas.student import StudentAnswerEntry
 
 _LABEL_STRIP_RE = re.compile(r"[^a-z0-9]+")
+# A leading "Q" is a question marker, not part of the number. Stripping punctuation
+# alone left "Q1" as "q1" while a student's bare "1" stayed "1", so the two never
+# matched and every such question fell through to the LLM content matcher.
+# Only stripped before a digit, so a subpart labelled just "q" survives intact.
+_LEADING_Q_RE = re.compile(r"^q(?=\d)")
 
 
 def normalize_label(raw: str) -> str:
     """'Q2(b)', '2.b', '2 b', 'Q.2.b' all normalize to '2b'."""
-    return _LABEL_STRIP_RE.sub("", raw.lower())
+    return _LEADING_Q_RE.sub("", _LABEL_STRIP_RE.sub("", raw.lower()))
 
 
 LLM_MATCH_PROMPT = """\
@@ -50,14 +56,45 @@ class HybridQuestionMapper(QuestionMapper):
         self._router = router
 
     async def map(self, units: list[GradableUnit], entries: list[StudentAnswerEntry]) -> list[MappedAnswer]:
-        by_norm_label: dict[str, GradableUnit] = {normalize_label(u.label): u for u in units}
+        # Labels are NOT unique across a paper — sections routinely restart numbering,
+        # so "1" can mean Section A Q1 and Section B Q1 on the same sheet. Keyed by a
+        # bare label (as this used to be) the later section silently overwrites the
+        # earlier one, which both zeroes Section A and grades Section B against
+        # Section A's answers. Group by label and disambiguate below instead.
+        by_norm_label: dict[str, list[GradableUnit]] = defaultdict(list)
+        for u in units:
+            by_norm_label[normalize_label(u.label)].append(u)
+
+        # How many times the student wrote each label, and which occurrence each entry is.
+        # Keyed by id() rather than the entry itself: two answers can be byte-identical
+        # (same label, same text) and would otherwise collapse to one occurrence.
+        label_counts: dict[str, int] = defaultdict(int)
+        occurrence_of: dict[int, int] = {}
+        for e in entries:
+            key = normalize_label(e.raw_label)
+            if key:
+                occurrence_of[id(e)] = label_counts[key]
+                label_counts[key] += 1
 
         matched: dict[str, MappedAnswer] = {}
         unmatched_entries: list[StudentAnswerEntry] = []
 
         for entry in entries:
             key = normalize_label(entry.raw_label)
-            unit = by_norm_label.get(key) if key else None
+            candidates = by_norm_label.get(key, []) if key else []
+
+            if len(candidates) == 1:
+                unit = candidates[0]
+            elif len(candidates) > 1 and label_counts[key] == len(candidates):
+                # Ambiguous label, but the student wrote it exactly as many times as the
+                # paper uses it — pair them up in order (k-th written "1" answers the
+                # k-th "1" on the paper). Safe because the counts line up exactly.
+                unit = candidates[occurrence_of[id(entry)]]
+            else:
+                # Genuinely ambiguous (counts disagree) — hand it to content matching
+                # rather than guessing, since a wrong guess grades the wrong question.
+                unit = None
+
             if unit is not None and unit.unit_id not in matched:
                 matched[unit.unit_id] = MappedAnswer(
                     unit=unit, student_entry=entry, match_method="deterministic", confidence=1.0

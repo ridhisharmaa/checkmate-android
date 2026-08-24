@@ -5,6 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db import get_db
 from app.jobs.queue import enqueue
 from app.models.submission import GradingJob, QuestionResult, Submission
+from app.pipeline.aggregator import grade_letter
 from app.schemas.api import (
     QuestionOverridePatchRequest,
     SubmissionCreateResponse,
@@ -144,6 +145,11 @@ async def override_question(
         raise HTTPException(status_code=404, detail="submission not found")
     submission.total_score = round(sum(r.final_score for r in counted), 2)
     submission.max_score = round(sum(r.max_marks for r in counted), 2)
+    # Recompute the letter too — it's derived from the totals, so leaving it alone
+    # left the Results screen showing the pre-override grade next to the new score.
+    submission.grade_letter = grade_letter(
+        (submission.total_score / submission.max_score * 100) if submission.max_score > 0 else 0.0
+    )
     await db.commit()
 
     return await get_submission(submission_id, db)

@@ -126,10 +126,16 @@ def build_router(settings: Settings) -> ModelRouter:
             candidates.append(_Candidate(entry["id"], provider, entry["tier"]))
         chains[capability] = candidates
 
-    if not chains.get(Capability.VISION):
+    # Must be a *cloud* vision candidate, not merely any candidate. The local Ollama
+    # entry declares no requires_env, so it is always present and would satisfy a bare
+    # emptiness check — letting the server boot clean with no API keys at all and then
+    # fail deep in the first grading run against an Ollama that usually isn't running.
+    # Handwriting OCR is the accuracy-critical stage; refuse to start without a real one.
+    if not [c for c in chains.get(Capability.VISION, []) if c.tier == "cloud"]:
         raise RuntimeError(
-            "No vision-capable model candidates available — check GEMINI_API_KEYS in .env "
-            "and app/routing/model_registry.yaml."
+            "No cloud vision model is configured — handwriting OCR needs one. Set "
+            "GEMINI_API_KEYS (or OPENAI_API_KEY / ANTHROPIC_API_KEY) in backend/.env. "
+            "Copy backend/.env.example to backend/.env if you haven't yet."
         )
 
     return ModelRouter(chains)
