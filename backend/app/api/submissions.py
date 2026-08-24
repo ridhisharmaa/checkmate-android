@@ -5,17 +5,42 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db import get_db
 from app.jobs.queue import enqueue
 from app.models.submission import GradingJob, QuestionResult, Submission
+from app.pipeline.aggregator import aggregate
 from app.schemas.api import (
     QuestionOverridePatchRequest,
     SubmissionCreateResponse,
     SubmissionDetailResponse,
 )
+from app.schemas.document import TeacherDocument
 from app.schemas.grading import OverviewSummary, QuestionGradeResult, SubmissionResult
 from app.storage.local import save_bytes, save_upload
 
 router = APIRouter()
 
 OVERRIDE_FRACTIONS = {"full": 1.0, "half": 0.5, "no_credit": 0.0}
+
+
+def _row_to_result(r: QuestionResult) -> QuestionGradeResult:
+    return QuestionGradeResult(
+        id=r.id,
+        unit_id=r.unit_id,
+        path=r.path_json,
+        label=r.label,
+        question_text=r.question_text,
+        model_answer=r.model_answer,
+        student_answer=r.student_answer,
+        attempted=r.attempted,
+        max_marks=r.max_marks,
+        similarity_score=r.similarity_score,
+        llm_score_pct=r.llm_score_pct,
+        final_score=r.final_score,
+        feedback=r.feedback,
+        counted_toward_total=r.counted_toward_total,
+        teacher_override=r.teacher_override,  # type: ignore[arg-type]
+        has_diagram=r.has_diagram,
+        has_table=r.has_table,
+        has_code=r.has_code,
+    )
 
 
 @router.post("/submissions", response_model=SubmissionCreateResponse)
@@ -28,8 +53,12 @@ async def create_submission(
     db.add(submission)
     await db.flush()  # assigns submission.id, needed for the storage path below
 
-    submission.teacher_file_paths = [await save_upload(submission.id, "teacher", f) for f in teacher_files]
-    submission.student_file_paths = [await save_upload(submission.id, "student", f) for f in student_files]
+    submission.teacher_file_paths = [
+        await save_upload(submission.id, "teacher", i, f) for i, f in enumerate(teacher_files)
+    ]
+    submission.student_file_paths = [
+        await save_upload(submission.id, "student", i, f) for i, f in enumerate(student_files)
+    ]
 
     job = GradingJob(submission_id=submission.id, status="queued")
     db.add(job)
@@ -57,9 +86,9 @@ async def create_submissions_batch(
         await db.flush()
 
         submission.teacher_file_paths = [
-            save_bytes(submission.id, "teacher", name, blob) for name, blob in teacher_blobs
+            save_bytes(submission.id, "teacher", i, name, blob) for i, (name, blob) in enumerate(teacher_blobs)
         ]
-        submission.student_file_paths = [await save_upload(submission.id, "student", student_file)]
+        submission.student_file_paths = [await save_upload(submission.id, "student", 0, student_file)]
 
         job = GradingJob(submission_id=submission.id, status="queued")
         db.add(job)
@@ -84,29 +113,7 @@ async def get_submission(submission_id: str, db: AsyncSession = Depends(get_db))
         await db.execute(select(QuestionResult).where(QuestionResult.submission_id == submission_id))
     ).scalars().all()
 
-    results = [
-        QuestionGradeResult(
-            id=r.id,
-            unit_id=r.unit_id,
-            path=r.path_json,
-            label=r.label,
-            question_text=r.question_text,
-            model_answer=r.model_answer,
-            student_answer=r.student_answer,
-            attempted=r.attempted,
-            max_marks=r.max_marks,
-            similarity_score=r.similarity_score,
-            llm_score_pct=r.llm_score_pct,
-            final_score=r.final_score,
-            feedback=r.feedback,
-            counted_toward_total=r.counted_toward_total,
-            teacher_override=r.teacher_override,  # type: ignore[arg-type]
-            has_diagram=r.has_diagram,
-            has_table=r.has_table,
-            has_code=r.has_code,
-        )
-        for r in rows
-    ]
+    results = [_row_to_result(r) for r in rows]
 
     submission_result = SubmissionResult(
         overview=OverviewSummary.model_validate(submission.overview_json or {"strengths": [], "watch_for": []}),
@@ -137,13 +144,30 @@ async def override_question(
     rows = (
         await db.execute(select(QuestionResult).where(QuestionResult.submission_id == submission_id))
     ).scalars().all()
-    counted = [r for r in rows if r.counted_toward_total]
 
     submission = await db.get(Submission, submission_id)
     if submission is None:
         raise HTTPException(status_code=404, detail="submission not found")
-    submission.total_score = round(sum(r.final_score for r in counted), 2)
-    submission.max_score = round(sum(r.max_marks for r in counted), 2)
+
+    # Re-run the real aggregator rather than re-adding the totals by hand. Summing the
+    # already-counted rows kept whichever answers won the "attempt any N of M" choice
+    # at grading time, so raising an excluded answer to full marks could not promote it
+    # into the counted set — and grade_letter, being derived, went stale as well.
+    teacher_doc = TeacherDocument.model_validate(submission.teacher_document_json or {"sections": []})
+    recomputed = aggregate(
+        teacher_doc,
+        [_row_to_result(r) for r in rows],
+        OverviewSummary.model_validate(submission.overview_json or {"strengths": [], "watch_for": []}),
+        submission.handwriting_confidence or 0.0,
+    )
+
+    counted_by_unit = {r.unit_id: r.counted_toward_total for r in recomputed.results}
+    for row in rows:
+        row.counted_toward_total = counted_by_unit.get(row.unit_id, row.counted_toward_total)
+
+    submission.total_score = recomputed.total_score
+    submission.max_score = recomputed.max_score
+    submission.grade_letter = recomputed.grade_letter
     await db.commit()
 
     return await get_submission(submission_id, db)

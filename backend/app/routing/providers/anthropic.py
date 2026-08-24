@@ -1,6 +1,6 @@
 import base64
 
-from anthropic import AsyncAnthropic, APIStatusError
+from anthropic import APIError, AsyncAnthropic
 from pydantic import BaseModel
 
 from app.routing import cooldown
@@ -50,10 +50,17 @@ class AnthropicProvider(ModelProvider):
                 tool_choice={"type": "tool", "name": _TOOL_NAME},
                 messages=[{"role": "user", "content": content}],
             )
-        except APIStatusError as e:
-            is_quota = e.status_code in _QUOTA_STATUS_CODES
+        # APIError, not APIStatusError -- see the note in openai.py: connection errors
+        # and timeouts are siblings of APIStatusError, so the narrower catch let a
+        # dropped network bypass the router's fallback chain entirely.
+        except APIError as e:
+            status = getattr(e, "status_code", None)  # absent on connection errors
+            is_quota = status in _QUOTA_STATUS_CODES
             cooldown.mark_failure(self.candidate_id, is_quota_related=is_quota)
             raise ProviderError(f"anthropic failed: {e}", is_quota_related=is_quota) from e
+        except Exception as e:  # unexpected SDK error -- still let the router fall through
+            cooldown.mark_failure(self.candidate_id, is_quota_related=False)
+            raise ProviderError(f"anthropic failed unexpectedly: {e}") from e
 
         tool_use = next((b for b in response.content if b.type == "tool_use"), None)
         if tool_use is None:

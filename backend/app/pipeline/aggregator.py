@@ -15,7 +15,7 @@ _GRADE_BANDS = [
 ]
 
 
-def _grade_letter(pct: float) -> str:
+def grade_letter(pct: float) -> str:
     for threshold, letter in _GRADE_BANDS:
         if pct >= threshold:
             return letter
@@ -40,14 +40,21 @@ def aggregate(
         rule = title_to_rule.get(section_title)
         if rule is None or rule.type != "attempt_n_of_m":
             continue
-        attempted = [r for r in section_results if r.attempted]
-        if len(attempted) <= rule.n:
-            continue
-        attempted_sorted = sorted(attempted, key=lambda r: r.final_score, reverse=True)
-        keep_ids = {r.unit_id for r in attempted_sorted[: rule.n]}
+
+        # Exactly `rule.n` units count, no more and no fewer — the section is out of
+        # n questions' worth of marks regardless of how many the student attempted.
+        # Best-n-by-score of the attempted ones count first; if the student attempted
+        # fewer than n, unattempted units (in document order) pad the denominator out
+        # to n so the skipped questions cost marks. Everything beyond n is excluded
+        # from BOTH total_score and max_score — leaving unattempted extras counted is
+        # what previously scored a perfect "attempt any 2 of 4" paper as 20/40.
+        attempted = sorted(
+            (r for r in section_results if r.attempted), key=lambda r: r.final_score, reverse=True
+        )
+        unattempted = [r for r in section_results if not r.attempted]
+        keep_ids = {r.unit_id for r in (attempted + unattempted)[: rule.n]}
         for r in section_results:
-            if r.attempted and r.unit_id not in keep_ids:
-                r.counted_toward_total = False
+            r.counted_toward_total = r.unit_id in keep_ids
 
     counted = [r for r in results if r.counted_toward_total]
     total_score = round(sum(r.final_score for r in counted), 2)
@@ -60,5 +67,5 @@ def aggregate(
         results=results,
         total_score=total_score,
         max_score=max_score,
-        grade_letter=_grade_letter(pct),
+        grade_letter=grade_letter(pct),
     )

@@ -1,6 +1,6 @@
 import base64
 
-from openai import AsyncOpenAI, APIStatusError
+from openai import APIError, AsyncOpenAI
 from pydantic import BaseModel
 
 from app.routing import cooldown
@@ -33,10 +33,19 @@ class OpenAIProvider(ModelProvider):
                 messages=[{"role": "user", "content": content}],
                 response_format=response_schema,
             )
-        except APIStatusError as e:
-            is_quota = e.status_code in _QUOTA_STATUS_CODES
+        # APIError, not APIStatusError: connection errors and timeouts are siblings of
+        # APIStatusError, not subclasses, so catching the narrower type let a dropped
+        # network escape as a non-ProviderError. The router only catches ProviderError,
+        # so that killed the whole stage instead of falling through to the next model —
+        # defeating the fallback chain in exactly the situation it exists for.
+        except APIError as e:
+            status = getattr(e, "status_code", None)  # absent on connection errors
+            is_quota = status in _QUOTA_STATUS_CODES
             cooldown.mark_failure(self.candidate_id, is_quota_related=is_quota)
             raise ProviderError(f"openai failed: {e}", is_quota_related=is_quota) from e
+        except Exception as e:  # malformed response, unexpected SDK error, ...
+            cooldown.mark_failure(self.candidate_id, is_quota_related=False)
+            raise ProviderError(f"openai failed unexpectedly: {e}") from e
 
         parsed = completion.choices[0].message.parsed
         if parsed is None:

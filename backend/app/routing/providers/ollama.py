@@ -42,6 +42,9 @@ class OllamaProvider(ModelProvider):
         except httpx.HTTPError as e:
             cooldown.mark_failure(self.candidate_id, is_quota_related=False)
             raise ProviderError(f"ollama ({self.model_name}) request failed: {e}") from e
+        except Exception as e:  # e.g. a non-JSON body, which resp.json() raises on
+            cooldown.mark_failure(self.candidate_id, is_quota_related=False)
+            raise ProviderError(f"ollama ({self.model_name}) request failed unexpectedly: {e}") from e
 
         raw_content = data.get("message", {}).get("content", "")
         try:
