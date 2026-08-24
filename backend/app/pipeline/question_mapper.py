@@ -109,12 +109,22 @@ class HybridQuestionMapper(QuestionMapper):
                 llm_pairs = await self._llm_assisted_match(unmatched_units, unmatched_entries)
             except RouterExhaustedError:
                 llm_pairs = []  # degrade: leave these as unmatched rather than failing the whole submission
-            for pair in llm_pairs:
+            # Highest-confidence pairs first, so when the model claims one answer for
+            # several questions the strongest claim wins rather than whichever happened
+            # to come first in the response.
+            claimed_entries: set[int] = set()
+            for pair in sorted(llm_pairs, key=lambda p: p.confidence, reverse=True):
                 unit = next((u for u in unmatched_units if u.unit_id == pair.unit_id), None)
                 if unit is None or unit.unit_id in matched:
                     continue
                 if not (0 <= pair.entry_index < len(unmatched_entries)):
                     continue
+                # One student answer can only be the answer to one question. Without
+                # this the same entry could be attached to several units, so a single
+                # answer scored marks repeatedly across different questions.
+                if pair.entry_index in claimed_entries:
+                    continue
+                claimed_entries.add(pair.entry_index)
                 matched[unit.unit_id] = MappedAnswer(
                     unit=unit,
                     student_entry=unmatched_entries[pair.entry_index],

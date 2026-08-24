@@ -8,11 +8,13 @@ import com.checkmate.app.network.ApiClient
 import com.checkmate.app.network.QuestionOverridePatchRequest
 import com.checkmate.app.network.SubmissionResult
 import com.checkmate.app.network.uriToMultipart
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 data class GradingUiState(
     val teacherUris: List<Uri> = emptyList(),
@@ -41,11 +43,20 @@ class GradingViewModel : ViewModel() {
             return false
         }
 
+        // Application context, not the Activity's: this outlives the coroutine's caller
+        // and holding the Activity would leak it across a rotation.
+        val appContext = context.applicationContext
+
         viewModelScope.launch {
             _uiState.update { it.copy(isBusy = true, errorMessage = null, status = "uploading", result = null) }
             try {
-                val teacherParts = current.teacherUris.map { uriToMultipart(context, it, "teacher_files") }
-                val studentParts = current.studentUris.map { uriToMultipart(context, it, "student_files") }
+                // viewModelScope defaults to Dispatchers.Main, so reading the picked
+                // files here read whole multi-megabyte PDFs on the UI thread — visible
+                // jank, and an ANR on a large answer sheet.
+                val (teacherParts, studentParts) = withContext(Dispatchers.IO) {
+                    current.teacherUris.map { uriToMultipart(appContext, it, "teacher_files") } to
+                        current.studentUris.map { uriToMultipart(appContext, it, "student_files") }
+                }
                 val response = ApiClient.service.createSubmission(teacherParts, studentParts)
                 _uiState.update { it.copy(submissionId = response.submissionId, status = "queued") }
                 pollJob(response.jobId, response.submissionId)
@@ -87,9 +98,20 @@ class GradingViewModel : ViewModel() {
     private suspend fun loadResult(submissionId: String) {
         try {
             val detail = ApiClient.service.getSubmission(submissionId)
+            if (detail.result == null) {
+                // Job says done but the payload has no result — treat as a failure
+                // rather than sitting on the progress screen forever.
+                _uiState.update {
+                    it.copy(isBusy = false, status = "failed", errorMessage = "Grading finished but returned no result.")
+                }
+                return
+            }
             _uiState.update { it.copy(isBusy = false, result = detail.result) }
         } catch (e: Exception) {
-            _uiState.update { it.copy(isBusy = false, errorMessage = describeError(e)) }
+            // Must mark the status failed, not just set a message: the progress screen
+            // now waits for a result before navigating, and only renders an error in
+            // the "failed" state — otherwise a fetch error would hang on that screen.
+            _uiState.update { it.copy(isBusy = false, status = "failed", errorMessage = describeError(e)) }
         }
     }
 

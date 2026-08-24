@@ -8,7 +8,7 @@ import asyncio
 
 from app.pipeline.question_mapper import HybridQuestionMapper, normalize_label
 from app.schemas.document import Question, Section, TeacherDocument, flatten_to_units
-from app.schemas.mapping import LLMMatchResult
+from app.schemas.mapping import LLMMatchPair, LLMMatchResult
 from app.schemas.student import StudentAnswerEntry
 
 
@@ -47,6 +47,9 @@ TWO_SECTION_PAPER = TeacherDocument(
         ),
     ]
 )
+
+
+UNIT_IDS: list[str] = []
 
 
 def _map(units, entries, router=None):
@@ -155,3 +158,27 @@ def test_teacher_q_prefix_matches_student_bare_number():
 
     assert [m.student_entry.answer_text for m in mapped] == ["first", "second"]
     assert not router.called
+
+
+def test_one_student_answer_cannot_be_claimed_by_two_questions():
+    """The LLM matcher may return overlapping pairs; only the confident one may win."""
+
+    class OverlappingRouter:
+        async def generate(self, *args, **kwargs):
+            # Both questions claim entry 0; the second is the more confident claim.
+            return LLMMatchResult(
+                pairs=[
+                    LLMMatchPair(unit_id=UNIT_IDS[0], entry_index=0, confidence=0.4),
+                    LLMMatchPair(unit_id=UNIT_IDS[1], entry_index=0, confidence=0.9),
+                ]
+            )
+
+    units = flatten_to_units(TWO_SECTION_PAPER)
+    UNIT_IDS[:] = [units[0].unit_id, units[1].unit_id]
+    entries = [StudentAnswerEntry(raw_label="", answer_text="an unlabelled answer")]
+
+    mapped = _map(units, entries, OverlappingRouter())
+
+    holders = [m for m in mapped if m.student_entry is not None]
+    assert len(holders) == 1, "an answer must not be graded against two questions"
+    assert holders[0].unit.unit_id == UNIT_IDS[1], "the higher-confidence claim wins"

@@ -51,8 +51,11 @@ private enum class StepState { Done, Active, Pending }
 fun ProgressScreen(viewModel: GradingViewModel, onDone: () -> Unit, onBack: () -> Unit) {
     val state by viewModel.uiState.collectAsState()
 
-    LaunchedEffect(state.status) {
-        if (state.status == "done") onDone()
+    // Wait for the result itself, not just the job status. The status flips to "done"
+    // while the ViewModel is still fetching the result, so navigating on status alone
+    // landed on the results screen a beat early and flashed "No result yet."
+    LaunchedEffect(state.status, state.result) {
+        if (state.status == "done" && state.result != null) onDone()
     }
 
     Column(

@@ -56,6 +56,12 @@ class GeminiProvider(ModelProvider):
             is_quota = getattr(e, "code", None) in _QUOTA_STATUS_CODES
             cooldown.mark_failure(key_id, is_quota_related=is_quota)
             raise ProviderError(f"gemini key {idx} failed: {e}", is_quota_related=is_quota) from e
+        except Exception as e:
+            # Transport-level failures (DNS, dropped connection, timeout) surface from
+            # the underlying HTTP client, not as APIError. Without this they escape as
+            # non-ProviderError and skip the router's remaining candidates entirely.
+            cooldown.mark_failure(key_id, is_quota_related=False)
+            raise ProviderError(f"gemini key {idx} failed unexpectedly: {e}") from e
 
         if response.parsed is None:
             cooldown.mark_failure(key_id, is_quota_related=False)

@@ -95,3 +95,25 @@ def test_unattempted_choice_questions_are_excluded_from_the_response_totals():
     assert sum(1 for r in result.results if r.counted_toward_total) == 1
     # Excluded questions stay in the payload for display, just uncounted.
     assert len(result.results) == 3
+
+
+def test_override_can_promote_an_excluded_answer_into_the_counted_set():
+    """Backs the PATCH override endpoint, which re-runs aggregate() after a change.
+
+    Previously the endpoint re-added the already-counted rows by hand, so raising an
+    excluded answer to full marks could never displace one of the winners.
+    """
+    doc = _paper(3, rule=SelectionRule(n=2))
+    results = _results(doc, [10.0, 9.0, 2.0])
+
+    before = aggregate(doc, results, EMPTY_OVERVIEW, 0.9)
+    assert sorted(r.final_score for r in before.results if r.counted_toward_total) == [9.0, 10.0]
+
+    # Teacher overrides the weakest answer to full marks, then the totals are recomputed.
+    results[2].final_score = 10.0
+    after = aggregate(doc, results, EMPTY_OVERVIEW, 0.9)
+
+    counted = [r for r in after.results if r.counted_toward_total]
+    assert sorted(r.final_score for r in counted) == [10.0, 10.0]
+    assert after.results[2].counted_toward_total, "the upgraded answer must now count"
+    assert (after.total_score, after.max_score) == (20.0, 20.0)
