@@ -6,26 +6,59 @@
 # tier: cloud | local. Local candidates are always ranked last within a capability —
 # the router additionally hard-excludes local candidates from `vision` unless every
 # cloud vision candidate is unavailable/cooling down (handwriting OCR quality gap).
+#
+# Multiple Gemini model *names* are listed deliberately, not just one: each model name
+# has its own independent capacity pool on Google's side, so a 503 "high demand" on one
+# (e.g. gemini-flash-latest) does not mean the others are down too. Same API key works
+# across all of them — this only needs GEMINI_API_KEYS, nothing extra.
 
 vision:
-  - id: gemini-vision
+  - id: gemini-vision-1
     provider: gemini
     model: gemini-flash-latest
     quality_rank: 1
     tier: cloud
     requires_env: [GEMINI_API_KEYS]
 
+  - id: gemini-vision-2
+    provider: gemini
+    model: gemini-2.5-flash
+    quality_rank: 2
+    tier: cloud
+    requires_env: [GEMINI_API_KEYS]
+
+  - id: gemini-vision-3
+    provider: gemini
+    model: gemini-2.0-flash
+    quality_rank: 3
+    tier: cloud
+    requires_env: [GEMINI_API_KEYS]
+
+  - id: gemini-vision-4
+    provider: gemini
+    model: gemini-2.5-flash-lite
+    quality_rank: 4
+    tier: cloud
+    requires_env: [GEMINI_API_KEYS]
+
+  - id: gemini-vision-5
+    provider: gemini
+    model: gemini-2.0-flash-lite
+    quality_rank: 5
+    tier: cloud
+    requires_env: [GEMINI_API_KEYS]
+
   - id: openai-vision
     provider: openai
     model: gpt-4o-mini
-    quality_rank: 2
+    quality_rank: 6
     tier: cloud
     requires_env: [OPENAI_API_KEY]
 
   - id: anthropic-vision
     provider: anthropic
     model: claude-haiku-4-5
-    quality_rank: 3
+    quality_rank: 7
     tier: cloud
     requires_env: [ANTHROPIC_API_KEY]
 
@@ -37,30 +70,58 @@ vision:
     requires_env: []
 
 text:
-  - id: gemini-text
+  - id: gemini-text-1
     provider: gemini
     model: gemini-flash-latest
     quality_rank: 1
     tier: cloud
     requires_env: [GEMINI_API_KEYS]
 
+  - id: gemini-text-2
+    provider: gemini
+    model: gemini-2.5-flash
+    quality_rank: 2
+    tier: cloud
+    requires_env: [GEMINI_API_KEYS]
+
+  - id: gemini-text-3
+    provider: gemini
+    model: gemini-2.0-flash
+    quality_rank: 3
+    tier: cloud
+    requires_env: [GEMINI_API_KEYS]
+
+  - id: gemini-text-4
+    provider: gemini
+    model: gemini-2.5-flash-lite
+    quality_rank: 4
+    tier: cloud
+    requires_env: [GEMINI_API_KEYS]
+
+  - id: gemini-text-5
+    provider: gemini
+    model: gemini-2.0-flash-lite
+    quality_rank: 5
+    tier: cloud
+    requires_env: [GEMINI_API_KEYS]
+
   - id: openai-text
     provider: openai
     model: gpt-4o-mini
-    quality_rank: 2
+    quality_rank: 6
     tier: cloud
     requires_env: [OPENAI_API_KEY]
 
   - id: anthropic-text
     provider: anthropic
     model: claude-haiku-4-5
-    quality_rank: 3
+    quality_rank: 7
     tier: cloud
     requires_env: [ANTHROPIC_API_KEY]
 
   - id: ollama-text
     provider: ollama
     model: qwen2.5:7b-instruct
-    quality_rank: 4
+    quality_rank: 8
     tier: local
     requires_env: []
