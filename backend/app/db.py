@@ -19,7 +19,7 @@ async def init_db() -> None:
     # phase-3 SQLite -> Postgres cutover, but a bare create_all is enough while the
     # schema is still moving fast.
     async with _engine.begin() as conn:
-        from app.models import submission  # noqa: F401  (register models on Base.metadata)
+        from app.models import exam, submission, teacher  # noqa: F401  (register models on Base.metadata)
 
         await conn.run_sync(Base.metadata.create_all)
 

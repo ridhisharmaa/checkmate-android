@@ -2,9 +2,12 @@ from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.security import get_current_teacher
 from app.db import get_db
 from app.jobs.queue import enqueue
+from app.models.exam import Exam, Student
 from app.models.submission import GradingJob, QuestionResult, Submission
+from app.models.teacher import Teacher
 from app.pipeline.aggregator import aggregate
 from app.schemas.api import (
     QuestionOverridePatchRequest,
@@ -13,9 +16,9 @@ from app.schemas.api import (
 )
 from app.schemas.document import TeacherDocument
 from app.schemas.grading import OverviewSummary, QuestionGradeResult, SubmissionResult
-from app.storage.local import save_bytes, save_upload
+from app.storage.local import save_upload
 
-router = APIRouter()
+router = APIRouter(tags=["submissions"])
 
 OVERRIDE_FRACTIONS = {"full": 1.0, "half": 0.5, "no_credit": 0.0}
 
@@ -43,19 +46,45 @@ def _row_to_result(r: QuestionResult) -> QuestionGradeResult:
     )
 
 
-@router.post("/submissions", response_model=SubmissionCreateResponse)
+async def _get_owned_submission(submission_id: str, teacher: Teacher, db: AsyncSession) -> Submission:
+    submission = await db.get(Submission, submission_id)
+    if submission is None:
+        raise HTTPException(status_code=404, detail="submission not found")
+    exam = await db.get(Exam, submission.exam_id)
+    if exam is None or exam.teacher_id != teacher.id:
+        # 404, not 403 — don't reveal that a submission id belongs to someone else.
+        raise HTTPException(status_code=404, detail="submission not found")
+    return submission
+
+
+@router.post("/exams/{exam_id}/students/{student_id}/submission", response_model=SubmissionCreateResponse)
 async def create_submission(
-    teacher_files: list[UploadFile] = File(...),
+    exam_id: str,
+    student_id: str,
     student_files: list[UploadFile] = File(...),
+    teacher: Teacher = Depends(get_current_teacher),
     db: AsyncSession = Depends(get_db),
 ) -> SubmissionCreateResponse:
-    submission = Submission(status="queued")
+    exam = await db.get(Exam, exam_id)
+    if exam is None or exam.teacher_id != teacher.id:
+        raise HTTPException(status_code=404, detail="exam not found")
+    if exam.teacher_document_json is None:
+        raise HTTPException(status_code=422, detail="this exam's answer key has not been parsed yet")
+
+    student = await db.get(Student, student_id)
+    if student is None or student.exam_id != exam.id:
+        raise HTTPException(status_code=404, detail="roll number not found in this exam")
+
+    existing = (
+        await db.execute(select(Submission).where(Submission.student_id == student.id))
+    ).scalar_one_or_none()
+    if existing is not None:
+        raise HTTPException(status_code=409, detail="this roll number already has a submission")
+
+    submission = Submission(exam_id=exam.id, student_id=student.id, status="queued")
     db.add(submission)
     await db.flush()  # assigns submission.id, needed for the storage path below
 
-    submission.teacher_file_paths = [
-        await save_upload(submission.id, "teacher", i, f) for i, f in enumerate(teacher_files)
-    ]
     submission.student_file_paths = [
         await save_upload(submission.id, "student", i, f) for i, f in enumerate(student_files)
     ]
@@ -68,43 +97,13 @@ async def create_submission(
     return SubmissionCreateResponse(submission_id=submission.id, job_id=job.id)
 
 
-@router.post("/submissions/batch", response_model=list[SubmissionCreateResponse])
-async def create_submissions_batch(
-    teacher_files: list[UploadFile] = File(...),
-    student_files: list[UploadFile] = File(...),  # one sheet per student
-    db: AsyncSession = Depends(get_db),
-) -> list[SubmissionCreateResponse]:
-    # Read the shared teacher answer key once — UploadFile is a single-use stream,
-    # so re-invoking save_upload() on it for every student submission would only
-    # succeed for the first iteration and silently write empty files after that.
-    teacher_blobs = [(f.filename, await f.read()) for f in teacher_files]
-
-    responses = []
-    for student_file in student_files:
-        submission = Submission(status="queued")
-        db.add(submission)
-        await db.flush()
-
-        submission.teacher_file_paths = [
-            save_bytes(submission.id, "teacher", i, name, blob) for i, (name, blob) in enumerate(teacher_blobs)
-        ]
-        submission.student_file_paths = [await save_upload(submission.id, "student", 0, student_file)]
-
-        job = GradingJob(submission_id=submission.id, status="queued")
-        db.add(job)
-        await db.commit()
-
-        await enqueue(job.id)
-        responses.append(SubmissionCreateResponse(submission_id=submission.id, job_id=job.id))
-
-    return responses
-
-
 @router.get("/submissions/{submission_id}", response_model=SubmissionDetailResponse)
-async def get_submission(submission_id: str, db: AsyncSession = Depends(get_db)) -> SubmissionDetailResponse:
-    submission = await db.get(Submission, submission_id)
-    if submission is None:
-        raise HTTPException(status_code=404, detail="submission not found")
+async def get_submission(
+    submission_id: str,
+    teacher: Teacher = Depends(get_current_teacher),
+    db: AsyncSession = Depends(get_db),
+) -> SubmissionDetailResponse:
+    submission = await _get_owned_submission(submission_id, teacher, db)
 
     if submission.status != "done":
         return SubmissionDetailResponse(submission_id=submission.id, status=submission.status, result=None)  # type: ignore[arg-type]
@@ -131,8 +130,11 @@ async def override_question(
     submission_id: str,
     question_id: str,
     body: QuestionOverridePatchRequest,
+    teacher: Teacher = Depends(get_current_teacher),
     db: AsyncSession = Depends(get_db),
 ) -> SubmissionDetailResponse:
+    submission = await _get_owned_submission(submission_id, teacher, db)
+
     question = await db.get(QuestionResult, question_id)
     if question is None or question.submission_id != submission_id:
         raise HTTPException(status_code=404, detail="question result not found")
@@ -145,15 +147,13 @@ async def override_question(
         await db.execute(select(QuestionResult).where(QuestionResult.submission_id == submission_id))
     ).scalars().all()
 
-    submission = await db.get(Submission, submission_id)
-    if submission is None:
-        raise HTTPException(status_code=404, detail="submission not found")
+    exam = await db.get(Exam, submission.exam_id)
 
     # Re-run the real aggregator rather than re-adding the totals by hand. Summing the
     # already-counted rows kept whichever answers won the "attempt any N of M" choice
     # at grading time, so raising an excluded answer to full marks could not promote it
     # into the counted set — and grade_letter, being derived, went stale as well.
-    teacher_doc = TeacherDocument.model_validate(submission.teacher_document_json or {"sections": []})
+    teacher_doc = TeacherDocument.model_validate((exam and exam.teacher_document_json) or {"sections": []})
     recomputed = aggregate(
         teacher_doc,
         [_row_to_result(r) for r in rows],
@@ -170,4 +170,4 @@ async def override_question(
     submission.grade_letter = recomputed.grade_letter
     await db.commit()
 
-    return await get_submission(submission_id, db)
+    return await get_submission(submission_id, teacher, db)

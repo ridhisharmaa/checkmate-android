@@ -61,3 +61,42 @@ data class SubmissionResult(
 data class QuestionOverridePatchRequest(
     val override: String,
 )
+
+// --- Auth ---
+
+data class SignupRequest(val email: String, val password: String)
+data class LoginRequest(val email: String, val password: String)
+data class TokenResponse(val accessToken: String, val tokenType: String)
+data class TeacherResponse(val id: String, val email: String)
+
+// --- Exams & roster ---
+
+data class ExamSummary(
+    val id: String,
+    val title: String,
+    val subject: String,
+    val maxMarks: Double?,
+    val studentCount: Int,
+    val gradedCount: Int,
+)
+
+data class StudentSummary(
+    val id: String,
+    val rollNumber: String,
+    val submissionId: String?,
+    val status: String, // not_uploaded | queued | running | done | failed
+    val totalScore: Double?,
+    val maxScore: Double?,
+    val gradeLetter: String?,
+)
+
+data class ExamDetailResponse(
+    val id: String,
+    val title: String,
+    val subject: String,
+    val maxMarks: Double?,
+    val students: List<StudentSummary>,
+)
+
+data class RollRangeRequest(val start: Int, val end: Int)
+data class AddRollNumberRequest(val rollNumber: String)

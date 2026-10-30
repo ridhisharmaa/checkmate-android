@@ -60,4 +60,17 @@ dependencies {
     implementation("com.squareup.okhttp3:logging-interceptor:4.12.0")
 
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
+
+    // Encrypted on-device storage for the teacher's auth token.
+    implementation("androidx.security:security-crypto:1.1.0-alpha06")
+
+    // Camera capture for answer sheets (multi-page, per roll number).
+    val cameraxVersion = "1.4.1"
+    implementation("androidx.camera:camera-core:$cameraxVersion")
+    implementation("androidx.camera:camera-camera2:$cameraxVersion")
+    implementation("androidx.camera:camera-lifecycle:$cameraxVersion")
+    implementation("androidx.camera:camera-view:$cameraxVersion")
+
+    // Thumbnails of captured/picked sheet pages.
+    implementation("io.coil-kt:coil-compose:2.7.0")
 }

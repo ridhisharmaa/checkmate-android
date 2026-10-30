@@ -22,11 +22,13 @@ class Submission(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)
 
-    teacher_file_paths: Mapped[list] = mapped_column(JSON, default=list)
+    # The answer key now lives on Exam (parsed once) — a submission is scoped to one
+    # roll number within one exam, and only carries that student's own sheet.
+    exam_id: Mapped[str] = mapped_column(ForeignKey("exams.id"), index=True)
+    student_id: Mapped[str] = mapped_column(ForeignKey("students.id"), index=True)
     student_file_paths: Mapped[list] = mapped_column(JSON, default=list)
 
     status: Mapped[str] = mapped_column(String(16), default="queued")  # queued|running|done|failed
-    teacher_document_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     overview_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     handwriting_confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
 
@@ -34,6 +36,8 @@ class Submission(Base):
     max_score: Mapped[float | None] = mapped_column(Float, nullable=True)
     grade_letter: Mapped[str | None] = mapped_column(String(4), nullable=True)
 
+    exam: Mapped["Exam"] = relationship()
+    student: Mapped["Student"] = relationship()
     question_results: Mapped[list["QuestionResult"]] = relationship(
         back_populates="submission", cascade="all, delete-orphan"
     )

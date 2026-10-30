@@ -2,8 +2,10 @@ import asyncio
 import logging
 
 from app.db import session_factory as get_session_factory
+from app.models.exam import Exam
 from app.models.submission import GradingJob, QuestionResult, Submission
 from app.pipeline.orchestrator import GradingOrchestrator
+from app.schemas.document import TeacherDocument
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +35,14 @@ async def _process_job(job_id: str, orchestrator: GradingOrchestrator, session_f
             await session.commit()
             return
 
+        exam = await session.get(Exam, submission.exam_id)
+        if exam is None or exam.teacher_document_json is None:
+            job.status = "failed"
+            job.error_message = "exam or parsed answer key missing"
+            submission.status = "failed"
+            await session.commit()
+            return
+
         job.status = "running"
         submission.status = "running"
         await session.commit()
@@ -42,9 +52,8 @@ async def _process_job(job_id: str, orchestrator: GradingOrchestrator, session_f
             await session.commit()
 
         try:
-            teacher_doc, result = await orchestrator.run(
-                submission.teacher_file_paths, submission.student_file_paths, on_stage
-            )
+            teacher_doc = TeacherDocument.model_validate(exam.teacher_document_json)
+            result = await orchestrator.grade_submission(teacher_doc, submission.student_file_paths, on_stage)
         except Exception as e:
             # Total-stage failure: raised loudly by the pipeline, surfaced here as a
             # visible failed job rather than a silent/meaningless zero score.
@@ -56,7 +65,6 @@ async def _process_job(job_id: str, orchestrator: GradingOrchestrator, session_f
             await session.commit()
             return
 
-        submission.teacher_document_json = teacher_doc.model_dump()
         submission.overview_json = result.overview.model_dump()
         submission.handwriting_confidence = result.handwriting_confidence
         submission.total_score = result.total_score

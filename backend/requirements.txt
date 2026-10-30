@@ -8,6 +8,10 @@ sqlalchemy[asyncio]>=2.0
 aiosqlite>=0.20
 alembic>=1.14
 
+bcrypt>=4.0
+pyjwt>=2.9
+email-validator>=2.2
+
 google-genai>=0.8
 openai>=1.55
 anthropic>=0.40

@@ -29,14 +29,19 @@ class GradingOrchestrator:
         self._mapper = mapper
         self._grader = grader
 
-    async def run(
+    async def parse_answer_key(self, teacher_file_paths: list[str]) -> TeacherDocument:
+        """Parses the teacher's answer key. Called once per exam (from the exam-creation
+        endpoint), not once per student submission — OCR-ing the same answer key for
+        every student in a class would be redundant LLM calls for identical input."""
+        return await self._ocr_parser.parse_teacher(teacher_file_paths)
+
+    async def grade_submission(
         self,
-        teacher_file_paths: list[str],
+        teacher_doc: TeacherDocument,
         student_file_paths: list[str],
         on_stage: StageCallback,
-    ) -> tuple[TeacherDocument, SubmissionResult]:
+    ) -> SubmissionResult:
         await on_stage(STAGE_DETECTING_HANDWRITING)
-        teacher_doc = await self._ocr_parser.parse_teacher(teacher_file_paths)
         student_doc = await self._ocr_parser.parse_student(student_file_paths, teacher_doc)
 
         await on_stage(STAGE_MATCHING)
@@ -47,6 +52,4 @@ class GradingOrchestrator:
         results, overview = await self._grader.grade(mapped)
 
         await on_stage(STAGE_SUMMARIZING)
-        submission_result = aggregate(teacher_doc, results, overview, student_doc.handwriting_confidence)
-
-        return teacher_doc, submission_result
+        return aggregate(teacher_doc, results, overview, student_doc.handwriting_confidence)

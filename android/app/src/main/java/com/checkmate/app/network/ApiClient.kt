@@ -22,6 +22,7 @@ object ApiClient {
     val service: ApiService by lazy {
         val logging = HttpLoggingInterceptor().apply { level = HttpLoggingInterceptor.Level.BASIC }
         val client = OkHttpClient.Builder()
+            .addInterceptor(AuthInterceptor())
             .addInterceptor(logging)
             .connectTimeout(60, TimeUnit.SECONDS)
             .readTimeout(180, TimeUnit.SECONDS) // OCR/grading calls can genuinely take a while

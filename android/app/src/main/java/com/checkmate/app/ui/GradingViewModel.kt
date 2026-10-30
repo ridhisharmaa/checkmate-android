@@ -17,8 +17,9 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 data class GradingUiState(
-    val teacherUris: List<Uri> = emptyList(),
-    val studentUris: List<Uri> = emptyList(),
+    val examId: String? = null,
+    val studentId: String? = null,
+    val pageUris: List<Uri> = emptyList(),
     val status: String = "idle",
     val currentStage: String? = null,
     val errorMessage: String? = null,
@@ -27,19 +28,38 @@ data class GradingUiState(
     val isBusy: Boolean = false,
 )
 
+/** Shared across the capture -> progress -> results screens for a single submission,
+ * and also used (via [loadExisting]) to view an already-graded submission directly
+ * from the exam roster, skipping the upload/poll steps entirely. */
 class GradingViewModel : ViewModel() {
     private val _uiState = MutableStateFlow(GradingUiState())
     val uiState: StateFlow<GradingUiState> = _uiState
 
-    fun setTeacherUris(uris: List<Uri>) = _uiState.update { it.copy(teacherUris = uris) }
-    fun setStudentUris(uris: List<Uri>) = _uiState.update { it.copy(studentUris = uris) }
+    fun startForStudent(examId: String, studentId: String) {
+        _uiState.value = GradingUiState(examId = examId, studentId = studentId)
+    }
 
-    /** Returns false (and sets an error) without starting anything if files aren't selected yet —
-     * lets the caller (UploadScreen) decide whether to navigate based on a synchronous result. */
-    fun startGrading(context: Context): Boolean {
+    fun setPageUris(uris: List<Uri>) = _uiState.update { it.copy(pageUris = uris, errorMessage = null) }
+
+    fun addPageUri(uri: Uri) = _uiState.update { it.copy(pageUris = it.pageUris + uri, errorMessage = null) }
+
+    fun addPageUris(uris: List<Uri>) = _uiState.update { it.copy(pageUris = it.pageUris + uris, errorMessage = null) }
+
+    fun removeLastPage() = _uiState.update { it.copy(pageUris = it.pageUris.dropLast(1)) }
+
+    /** Returns false (and sets an error) without starting anything if no pages are
+     * captured/picked yet — lets the caller (CaptureScreen) decide whether to
+     * navigate based on a synchronous result. */
+    fun submit(context: Context): Boolean {
         val current = _uiState.value
-        if (current.teacherUris.isEmpty() || current.studentUris.isEmpty()) {
-            _uiState.update { it.copy(errorMessage = "Select at least one teacher file and one student file.") }
+        val examId = current.examId
+        val studentId = current.studentId
+        if (examId == null || studentId == null) {
+            _uiState.update { it.copy(errorMessage = "Missing exam/roll number context.") }
+            return false
+        }
+        if (current.pageUris.isEmpty()) {
+            _uiState.update { it.copy(errorMessage = "Capture or choose at least one page.") }
             return false
         }
 
@@ -51,13 +71,11 @@ class GradingViewModel : ViewModel() {
             _uiState.update { it.copy(isBusy = true, errorMessage = null, status = "uploading", result = null) }
             try {
                 // viewModelScope defaults to Dispatchers.Main, so reading the picked
-                // files here read whole multi-megabyte PDFs on the UI thread — visible
-                // jank, and an ANR on a large answer sheet.
-                val (teacherParts, studentParts) = withContext(Dispatchers.IO) {
-                    current.teacherUris.map { uriToMultipart(appContext, it, "teacher_files") } to
-                        current.studentUris.map { uriToMultipart(appContext, it, "student_files") }
+                // files here would read whole multi-megabyte images on the UI thread.
+                val parts = withContext(Dispatchers.IO) {
+                    current.pageUris.map { uriToMultipart(appContext, it, "student_files") }
                 }
-                val response = ApiClient.service.createSubmission(teacherParts, studentParts)
+                val response = ApiClient.service.createSubmission(examId, studentId, parts)
                 _uiState.update { it.copy(submissionId = response.submissionId, status = "queued") }
                 pollJob(response.jobId, response.submissionId)
             } catch (e: Exception) {
@@ -65,6 +83,13 @@ class GradingViewModel : ViewModel() {
             }
         }
         return true
+    }
+
+    /** Skips capture/upload/poll entirely — used when the teacher taps an already-graded
+     * roll number in the exam roster and just wants to view/override its result. */
+    fun loadExisting(submissionId: String) {
+        _uiState.value = GradingUiState(submissionId = submissionId, isBusy = true)
+        viewModelScope.launch { loadResult(submissionId) }
     }
 
     fun reset() {
@@ -106,7 +131,7 @@ class GradingViewModel : ViewModel() {
                 }
                 return
             }
-            _uiState.update { it.copy(isBusy = false, result = detail.result) }
+            _uiState.update { it.copy(isBusy = false, status = "done", result = detail.result) }
         } catch (e: Exception) {
             // Must mark the status failed, not just set a message: the progress screen
             // now waits for a result before navigating, and only renders an error in

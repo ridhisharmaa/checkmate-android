@@ -5,7 +5,12 @@ import android.net.Uri
 import android.provider.OpenableColumns
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.MultipartBody
+import okhttp3.RequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
+
+/** For a multipart request's plain-text form fields (e.g. FastAPI `Form(...)` params),
+ * as opposed to the file parts built by [uriToMultipart]. */
+fun String.toPlainRequestBody(): RequestBody = toRequestBody("text/plain".toMediaTypeOrNull())
 
 fun uriToMultipart(context: Context, uri: Uri, partName: String): MultipartBody.Part {
     val resolver = context.contentResolver

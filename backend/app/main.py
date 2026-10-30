@@ -6,7 +6,7 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from sentence_transformers import SentenceTransformer
 
-from app.api import jobs, submissions
+from app.api import auth, exams, jobs, submissions
 from app.config import get_settings
 from app.db import init_db
 from app.jobs.queue import start_workers, stop_workers
@@ -50,6 +50,8 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="CheckMate API", version="0.1.0", lifespan=lifespan)
 
+app.include_router(auth.router)
+app.include_router(exams.router)
 app.include_router(submissions.router, tags=["submissions"])
 app.include_router(jobs.router, tags=["jobs"])
 

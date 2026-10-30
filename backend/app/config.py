@@ -17,6 +17,11 @@ class Settings(BaseSettings):
     worker_count: int = 2
     model_registry_path: str = "./app/routing/model_registry.yaml"
 
+    # Dev-only default — every real deployment must override this via .env.
+    jwt_secret: str = "dev-only-insecure-secret-change-me"
+    jwt_algorithm: str = "HS256"
+    jwt_expire_minutes: int = 60 * 24 * 30  # 30 days: single-device teacher app, no refresh flow yet
+
     @property
     def gemini_keys(self) -> list[str]:
         return [k.strip() for k in self.gemini_api_keys.split(",") if k.strip()]
