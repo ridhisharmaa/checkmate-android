@@ -1,8 +1,10 @@
 """Stage: grade every mapped answer. Local sentence-transformers similarity is
 computed first (free, instant); one batched LLM call scores every question's
 rubric fit plus writes the overall overview, then the two are combined:
-final = 35% similarity + 65% LLM rubric score, plus a small bonus if the student
-included a diagram/table/code where the reference answer also had one.
+score = 35% similarity + 65% LLM rubric score, plus a small bonus if the student
+included a diagram/table/code where the reference answer also had one. That score
+(a percentage) is then banded per question: 70%+ gets full marks, 35% to under 70%
+gets half marks, under 35% gets zero (see marking.py).
 
 The LLM call falls back through the text chain (cloud first, Ollama last) since
 this stage is text-only — a lower-tier local model is an acceptable last resort
@@ -12,6 +14,7 @@ from abc import ABC, abstractmethod
 
 from sentence_transformers import SentenceTransformer, util
 
+from app.pipeline.marking import banded_marks
 from app.routing.base import Capability
 from app.routing.registry import ModelRouter, RouterExhaustedError
 from app.schemas.grading import LLMQuestionScore, OverviewSummary, QuestionGradeResult, ScoringCallResult
@@ -99,7 +102,8 @@ class LLMSemanticGrader(AnswerGrader):
                     if teacher_flag and student_flag:
                         bonus_fraction += DIAGRAM_BONUS_FRACTION
 
-            final_score = min(unit.max_marks, unit.max_marks * base_fraction + unit.max_marks * bonus_fraction)
+            score_pct = min(100.0, (base_fraction + bonus_fraction) * 100)
+            final_score = banded_marks(unit.max_marks, score_pct) if attempted else 0.0
 
             results.append(
                 QuestionGradeResult(
@@ -113,7 +117,7 @@ class LLMSemanticGrader(AnswerGrader):
                     max_marks=unit.max_marks,
                     similarity_score=sim if attempted else None,
                     llm_score_pct=llm_pct if attempted else None,
-                    final_score=round(final_score, 2),
+                    final_score=final_score,
                     feedback=feedback,
                     has_diagram=unit.has_diagram,
                     has_table=unit.has_table,

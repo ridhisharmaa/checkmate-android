@@ -1,5 +1,6 @@
 package com.checkmate.app.ui.components
 
+import com.checkmate.app.ui.marks
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -29,7 +30,7 @@ fun QuestionCard(q: QuestionGradeResult, onOverride: (String) -> Unit) {
             )
             Spacer(Modifier.height(4.dp))
             Text(
-                "Score: ${q.finalScore} / ${q.maxMarks}" + if (!q.countedTowardTotal) " (not counted)" else "",
+                "Score: ${q.finalScore.marks()} / ${q.maxMarks.marks()}" + if (!q.countedTowardTotal) " (not counted)" else "",
                 style = MaterialTheme.typography.bodyMedium,
             )
             Text("Feedback: ${q.feedback}", style = MaterialTheme.typography.bodySmall)

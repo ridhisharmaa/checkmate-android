@@ -49,7 +49,7 @@ fun ResultsScreen(viewModel: GradingViewModel, onGradeAnother: () -> Unit) {
         Column(Modifier.fillMaxWidth().padding(20.dp)) {
             Text("Results", style = MaterialTheme.typography.titleLarge)
             Spacer(Modifier.height(4.dp))
-            Text("${result.totalScore} / ${result.maxScore}", style = MaterialTheme.typography.displaySmall)
+            Text("${result.totalScore.marks()} / ${result.maxScore.marks()}", style = MaterialTheme.typography.displaySmall)
             Text("Grade: ${result.gradeLetter}", style = MaterialTheme.typography.titleMedium)
         }
 

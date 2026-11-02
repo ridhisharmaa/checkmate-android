@@ -9,6 +9,7 @@ from app.models.exam import Exam, Student
 from app.models.submission import GradingJob, QuestionResult, Submission
 from app.models.teacher import Teacher
 from app.pipeline.aggregator import aggregate
+from app.pipeline.marking import half_marks
 from app.schemas.api import (
     QuestionOverridePatchRequest,
     SubmissionCreateResponse,
@@ -20,7 +21,14 @@ from app.storage.local import save_upload
 
 router = APIRouter(tags=["submissions"])
 
-OVERRIDE_FRACTIONS = {"full": 1.0, "half": 0.5, "no_credit": 0.0}
+
+
+def override_marks(max_marks: float, override: str) -> float:
+    if override == "full":
+        return max_marks
+    if override == "half":
+        return half_marks(max_marks)
+    return 0.0
 
 
 def _row_to_result(r: QuestionResult) -> QuestionGradeResult:
@@ -140,7 +148,7 @@ async def override_question(
         raise HTTPException(status_code=404, detail="question result not found")
 
     question.teacher_override = body.override
-    question.final_score = round(question.max_marks * OVERRIDE_FRACTIONS[body.override], 2)
+    question.final_score = override_marks(question.max_marks, body.override)
     await db.flush()
 
     rows = (

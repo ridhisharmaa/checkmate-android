@@ -26,6 +26,11 @@ may span multiple pages given as images in order). Extract its full structure:
 - MCQs: set is_mcq true, capture mcq_options and mcq_correct.
 - Flag has_diagram / has_table / has_code true wherever the *reference answer*
   itself includes one (used later to give students credit for including their own).
+  Use these definitions: has_diagram = a drawn figure with labeled parts or
+  connections (for example boxes and arrows, a graph, a circuit or a labeled
+  sketch); has_table = content laid out in rows and columns; has_code = program
+  text or pseudocode written as statements. Plain paragraphs, headings and bullet
+  lists do not count as any of the three.
 
 Return ONLY the structured data — do not invent questions that aren't on the page.
 """
@@ -45,6 +50,11 @@ For each answer you find on the sheet, extract one entry:
 - answer_text: the transcribed handwritten answer, as faithfully as possible.
 - attempted: false only if the question is clearly listed/numbered but left blank.
 - has_diagram / has_table / has_code: true if the student included one for that answer.
+  Use these definitions: has_diagram = a drawn figure with labeled parts or
+  connections (for example boxes and arrows, a graph, a circuit or a labeled
+  sketch); has_table = content laid out in rows and columns; has_code = program
+  text or pseudocode written as statements. Plain paragraphs, headings and bullet
+  lists do not count as any of the three.
 
 If a page or portion is genuinely illegible, transcribe what you can and note
 "[ILLEGIBLE]" inline for the parts you cannot read — do not fabricate content.

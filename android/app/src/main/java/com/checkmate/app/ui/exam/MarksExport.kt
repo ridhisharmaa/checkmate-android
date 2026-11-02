@@ -1,5 +1,6 @@
 package com.checkmate.app.ui.exam
 
+import com.checkmate.app.ui.marks
 import android.content.Context
 import android.content.Intent
 import androidx.core.content.FileProvider
@@ -14,8 +15,8 @@ fun shareMarksCsv(context: Context, examTitle: String, students: List<StudentSum
             .forEach { s ->
                 appendLine(
                     listOf(
-                        s.rollNumber, s.status, s.totalScore?.toString().orEmpty(),
-                        s.maxScore?.toString().orEmpty(), s.gradeLetter.orEmpty(),
+                        s.rollNumber, s.status, s.totalScore?.marks().orEmpty(),
+                        s.maxScore?.marks().orEmpty(), s.gradeLetter.orEmpty(),
                     ).joinToString(","),
                 )
             }

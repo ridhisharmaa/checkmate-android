@@ -1,5 +1,6 @@
 package com.checkmate.app.ui.exam
 
+import com.checkmate.app.ui.marks
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -156,7 +157,7 @@ private fun RosterHeader(
 
     Column(Modifier.fillMaxWidth().padding(16.dp)) {
         Text(
-            "$gradedCount / $totalCount graded" + if (maxMarks != null) " · out of $maxMarks" else "",
+            "$gradedCount / $totalCount graded" + if (maxMarks != null) " · out of ${maxMarks.marks()}" else "",
             style = MaterialTheme.typography.titleSmall,
         )
         Spacer(Modifier.height(12.dp))
@@ -242,7 +243,7 @@ private fun StatusChip(student: StudentSummary) {
             Icon(Icons.Filled.CheckCircle, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
             Spacer(Modifier.width(6.dp))
             Text(
-                "${student.totalScore ?: 0}/${student.maxScore ?: 0} (${student.gradeLetter ?: ""})",
+                "${(student.totalScore ?: 0.0).marks()}/${(student.maxScore ?: 0.0).marks()} (${student.gradeLetter ?: ""})",
                 style = MaterialTheme.typography.bodyMedium,
             )
         }
